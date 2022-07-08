@@ -22,9 +22,27 @@ task_t *FILA_PRONTOS;
 
 task_t* scheduler(){
 	task_t *aux = FILA_PRONTOS;
-	queue_remove((queue_t**)&FILA_PRONTOS,(queue_t*)aux);
-	queue_append((queue_t **)&FILA_PRONTOS,(queue_t*)aux);
-	return aux;
+	task_t *atual = aux;
+	do{
+		if (aux->prio_din <= atual->prio_din)
+			atual = aux;
+		aux = aux->next;
+	}while(aux != FILA_PRONTOS);
+
+
+	queue_remove((queue_t**)&FILA_PRONTOS,(queue_t*)atual);
+	atual->prio_din = atual->prio_est;
+	//printf("escolhido elemento com prioridade %i \n", atual->prio_din);
+	if (queue_size((queue_t*)FILA_PRONTOS) > 0){
+		aux = FILA_PRONTOS;
+		do{
+			aux->prio_din--;
+			aux = aux->next;
+		}while(aux != FILA_PRONTOS);
+	}	
+	queue_append((queue_t **)&FILA_PRONTOS,(queue_t*)atual);
+
+	return atual;
 }
 
 void dispacher(){
@@ -71,6 +89,7 @@ void ppos_init(){
 	MAIN->status = 1;
 	MAIN->preemptable = 0;
 	getcontext(&MAIN->context);
+	task_setprio(MAIN,0);
 
 	ATUAL = MAIN;
 
@@ -106,7 +125,7 @@ int task_create(task_t *task,void (*start_func)(void *),void *arg){
    	ID++;
    	task->status = 1;
    	task->preemptable = 0;
-
+   	task_setprio(task,0);
 
    	makecontext (&task->context, (void*)(*start_func), 1, arg);
    	if (task != DISPATCHER){
@@ -146,5 +165,25 @@ int task_id(){
 // prontas ("ready queue")
 void task_yield(){
 	task_switch(DISPATCHER);
+}
+
+// define a prioridade estática de uma tarefa (ou a tarefa atual)
+void task_setprio (task_t *task, int prio){
+	if (task == NULL){
+		ATUAL->prio_est = prio;
+		ATUAL->prio_din = prio;
+		return;
+	}
+	task->prio_est = prio;
+	task->prio_din = prio;
+	return;
+}
+
+// retorna a prioridade estática de uma tarefa (ou a tarefa atual)
+int task_getprio (task_t *task){
+	if (task == NULL)
+		return ATUAL->prio_est;
+
+	return task->prio_est;
 }
 
