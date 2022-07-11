@@ -1,4 +1,4 @@
-CFLAGS = -Wextra
+CFLAGS = -Wall -Wextra
 CC = gcc -std=gnu99
 
 all: ppos_core
