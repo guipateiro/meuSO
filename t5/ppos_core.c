@@ -7,6 +7,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <ucontext.h>
+#include <signal.h>
+#include <sys/time.h>
 
 
 //estados do programa
@@ -20,9 +22,17 @@ task_t *MAIN;			//gurada a task main
 task_t *MAINAUX;		//guarda o a task que deve ser retornada pelo programas criados (atualmente o dispatcher)
 task_t *DISPATCHER;		//guarda a task dispatcher	
 task_t *ATUAL;			//guarda a task que esta atualemtne em execusao
+int TICK = 20;
 int ID = 0;				// id que serao atribuidos as novas tasks
 int TAMBUFFER = 65536; 	//1024* 64 memoria alocada para cada contexto
 int CODE = 1;			//codigo de retorno da ultima funcao
+// estrutura que define um tratador de sinal (deve ser global ou static)
+struct sigaction action;
+
+// estrutura de inicialização to timer
+struct itimerval timer;
+// ajusta valores do temporizador
+
 
 task_t *FILA_PRONTOS;   //fila de task que estao prontas para serem executada
 
@@ -32,7 +42,7 @@ task_t* scheduler(){
 	task_t *atual = aux;
 	//percorre a listae encontra o elemento com menor prioridade
 	do{
-		if (aux->prio_din <= atual->prio_din)
+		if (aux->prio_din < atual->prio_din)
 			atual = aux;
 		aux = aux->next;
 	}while(aux != FILA_PRONTOS);
@@ -70,7 +80,7 @@ void dispacher(){
 			task_switch(next);
 
 			//tratamento de CODE 	
-			switch(CODE){
+			switch(next->status){
 				case TERMINADA:
 					queue_remove((queue_t**)&FILA_PRONTOS,(queue_t*)next);
 					//printf("tarefa terminada com sucesso\n");
@@ -95,6 +105,42 @@ void dispacher(){
 	task_exit(0);
 }
 
+void tratador (){
+  if (ATUAL == DISPATCHER || ATUAL == MAIN)
+  	return;
+  TICK--;
+  if(! TICK){
+  	TICK = 20;
+  	task_yield();
+  }
+  return;
+}
+
+void criatratador(){
+	// registra a ação para o sinal SIGINT
+	action.sa_handler = tratador ;
+	sigemptyset (&action.sa_mask) ;
+	action.sa_flags = 0 ;
+
+	if (sigaction (SIGALRM, &action, 0) < 0){
+		perror ("Erro em sigaction: ") ;
+		exit (1) ;
+	}
+} 
+void criatimer(){
+
+	timer.it_value.tv_usec = 1000;		// primeiro disparo, em micro-segundos
+	timer.it_value.tv_sec  = 0;			// primeiro disparo, em segundos
+	timer.it_interval.tv_usec = 1000;	// disparos subsequentes, em micro-segundos
+	timer.it_interval.tv_sec  = 0;   	// disparos subsequentes, em segundos
+	
+	if (setitimer (ITIMER_REAL, &timer, 0) < 0){
+		perror ("Erro em setitimer: ") ;
+		exit (1) ;
+	}
+}
+
+
 // Inicializa o sistema operacional; deve ser chamada no inicio do main()
 void ppos_init(){
 
@@ -113,7 +159,8 @@ void ppos_init(){
 	//incrementa a ID e cria a primeira tarefa atual;
 	ID++;
 	ATUAL = MAIN;
-
+	criatratador();
+	criatimer();
 	DISPATCHER = malloc(sizeof(task_t));
 	task_create(DISPATCHER,dispacher,NULL);
 
@@ -167,6 +214,7 @@ void task_exit(int exit_code) {
 	task_t *aux = ATUAL;
 	task_t *nova = MAINAUX;
 	ATUAL = MAINAUX;
+	aux->status = TERMINADA;
 	CODE = exit_code;
 	if (swapcontext (&aux->context, &nova->context) < 0){
 		perror("erro em troca de contexto: ");
@@ -179,6 +227,8 @@ int task_switch(task_t *task){
 	task_t *aux = ATUAL;
 	task_t *nova = task;
 	ATUAL = task;
+	aux->status = PRONTA;
+	task->status = RODANDO;
 	if (swapcontext (&aux->context, &nova->context) < 0){
 		perror("erro em troca de contexto: ");
 		exit(1);

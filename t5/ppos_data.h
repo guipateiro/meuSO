@@ -1,6 +1,8 @@
+// Arquivo modificado 
 // GRR20197152 GUILHERME COSTA PATEIRO
-// Data da ultima modificacao 09/07/2022 22:33
+// Data da ultima modificacao 11/07/2022 18:05
 
+// PROJETO ORIGINAL FEITO POR:
 // PingPongOS - PingPong Operating System
 // Prof. Carlos A. Maziero, DINF UFPR
 // Versão 1.4 -- Janeiro de 2022
@@ -20,6 +22,8 @@ typedef struct task_t
   ucontext_t context ;			// contexto armazenado da tarefa
   short status ;			// pronta, rodando, suspensa, ...
   short preemptable ;			// pode ser preemptada?
+  short prio_est;
+  short prio_din;
    // ... (outros campos serão adicionados mais tarde)
 } task_t ;
 
