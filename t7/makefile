@@ -3,7 +3,7 @@
 CFLAGS = -Wall -Wextra
 CC = gcc -std=gnu99
 
-all: ppos_core
+all: ppos_maintask
 
 teste: all
 	./teste
@@ -11,11 +11,8 @@ teste: all
 queue.o: queue.c queue.h
 	$(CC) $(CFLAGS) -g -c $<
 
-ppos_core: ppos_core.c queue.o
-	$(CC) $(CFLAGS) -g -o teste $< queue.o pingpong-contab.c
-
-prio: ppos_core.c queue.o
-	$(CC) $(CFLAGS) -g -o teste $< queue.o pingpong-contab-prio.c	
+ppos_maintask: ppos_core.c queue.o
+	$(CC) $(CFLAGS) -g -o teste $< queue.o pingpong-maintask.c
 
 clear:
 	rm -f *.o

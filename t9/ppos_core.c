@@ -13,6 +13,7 @@
 
 //estados do programa
 #define TERMINADA 0
+#define SUSPENSA 4
 #define RODANDO 3
 #define DORMINDO 2
 #define PRONTA 1
@@ -29,13 +30,54 @@ int CODE = 1;			//codigo de retorno da ultima funcao
 unsigned int clock = 0;
 // estrutura que define um tratador de sinal (deve ser global ou static)
 struct sigaction action;
+int tarefas_ativas = 0;
 
 // estrutura de inicialização to timer
 struct itimerval timer;
 // ajusta valores do temporizador
 
+task_t *FILA_PRONTOS 	= NULL ;   //fila de task que estao prontas para serem executada
+task_t *FILA_SUSPENSA	= NULL;  //fila de tarefas suspensas
+task_t *FILA_TERMINADA 	= NULL ; 
+task_t *FILA_DORMITORIO	= NULL ; 
 
-task_t *FILA_PRONTOS;   //fila de task que estao prontas para serem executada
+void verificajoin(task_t *task){
+	task_t *aux = FILA_SUSPENSA;
+	
+	if (queue_size((queue_t*)FILA_SUSPENSA) > 0){
+		do{
+			if (aux->espera == task){
+				task_resume(aux,&FILA_SUSPENSA);
+				if(queue_size((queue_t*)FILA_SUSPENSA) == 0)
+					return;
+			}	
+			else{
+				aux = aux->next;
+			}
+		}while(aux != FILA_SUSPENSA);
+	}
+	
+	return;
+}
+
+void verifica_dormitorio(){
+	
+	task_t *aux = FILA_DORMITORIO;
+	
+	if (queue_size((queue_t*)FILA_DORMITORIO) > 0){
+		do{
+			if (aux->sleep <= systime()){
+				task_resume(aux,&FILA_DORMITORIO);
+				if(queue_size((queue_t*)FILA_DORMITORIO) == 0)
+					return;
+			}	
+			else{
+				aux = aux->next;
+			}
+		}while(aux != FILA_DORMITORIO);
+	}
+	return;
+}
 
 //funcao qu selecioana a proxima task baseado na priridade dinamica dela
 task_t* scheduler(){
@@ -43,26 +85,15 @@ task_t* scheduler(){
 	task_t *atual = aux;
 	//percorre a listae encontra o elemento com menor prioridade
 	do{
+		aux->prio_din--;
 		if (aux->prio_din < atual->prio_din)
 			atual = aux;
 		aux = aux->next;
 	}while(aux != FILA_PRONTOS);
 
-	//remove o elementoda lista para anao ser afetado pelo decremento de prioridade
-	queue_remove((queue_t**)&FILA_PRONTOS,(queue_t*)atual);
 	//retorna a prioridade para o original
 	atual->prio_din = atual->prio_est;
-	//decrementa a prioridade de todos os elementos da fila
-	if (queue_size((queue_t*)FILA_PRONTOS) > 0){
-		aux = FILA_PRONTOS;
-		do{
-			aux->prio_din--;
-			aux = aux->next;
-		}while(aux != FILA_PRONTOS);
-	}	
-	//coloca o elemento selecionad de volta na fila de prontos
-	queue_append((queue_t **)&FILA_PRONTOS,(queue_t*)atual);
-
+	
 	return atual;
 }
 
@@ -71,8 +102,20 @@ void dispacher(){
 	//printf("inicio do dispatcher\n");
 	MAINAUX = DISPATCHER;
 	task_t *next = NULL;
-	while(queue_size((queue_t*)FILA_PRONTOS) > 0){
-		next = scheduler();
+	//printf ("TAREFAS : %i ", queue_size((queue_t*)FILA_PRONTOS));
+	//fflush(stdout);
+	while(tarefas_ativas > 0){
+		next = NULL;
+		if (queue_size((queue_t*)FILA_DORMITORIO) > 0){
+			verifica_dormitorio();
+		}
+
+		if (queue_size((queue_t*)FILA_PRONTOS) > 0){
+			next = scheduler();
+		}
+		else{
+			sleep(1);
+		}
 		//reseta o code
 		CODE = PRONTA;
 		if (next != NULL){
@@ -84,6 +127,8 @@ void dispacher(){
 			switch(next->status){
 				case TERMINADA:
 					queue_remove((queue_t**)&FILA_PRONTOS,(queue_t*)next);
+					tarefas_ativas--;
+					queue_append((queue_t**)&FILA_TERMINADA,(queue_t*)next);
 					//printf("tarefa terminada com sucesso\n");
 				break;
 				case RODANDO:
@@ -91,8 +136,9 @@ void dispacher(){
 					//printf("algo esta estranho a tarefa ainda esta rodando\n");
 				break;
 				case DORMINDO:
-					//ainda nao usado
-					//printf("tarefa colocada para dormir\n");
+					printf("colocado no dormitorio\n\n");
+					//queue_remove((queue_t**)&FILA_PRONTOS,(queue_t*)next);
+					//queue_append((queue_t**)&FILA_DORMITORIO,(queue_t*)next);
 				break;
 				case PRONTA:
 					//ainda nao usado
@@ -101,14 +147,15 @@ void dispacher(){
 			}
 		}
 	}
+	printf("tarefas terminadas: %i\n",queue_size((queue_t*)FILA_TERMINADA));
 	//recoloca a main para poder fazer um retorno	
-	MAINAUX = MAIN;
+	//MAINAUX = MAIN;
 	task_exit(0);
 }
 
 void tratador (){
 	clock++;
-	if (ATUAL == DISPATCHER || ATUAL == MAIN)
+	if (ATUAL == DISPATCHER)
 		return;
 	TICK--;
 	if(! TICK){
@@ -137,7 +184,7 @@ void criatimer(){
 	timer.it_interval.tv_sec  = 0;   	// disparos subsequentes, em segundos
 	
 	if (setitimer (ITIMER_REAL, &timer, 0) < 0){
-		perror ("Erro em setitimer: ") ;
+		perror ("Erro em set timer: ");
 		exit (1) ;
 	}
 }
@@ -154,17 +201,21 @@ void ppos_init(){
 	MAIN->id = ID;
 	
 	MAIN->status = 1;
-	MAIN->preemptable = 0;
+	MAIN->preemptable = 1;
+	MAIN->status = PRONTA;
+	MAIN->ativacoes = 0;
 	getcontext(&MAIN->context);
 	task_setprio(MAIN,0);
-
+	queue_append((queue_t **)&FILA_PRONTOS,(queue_t*)MAIN);
 	//incrementa a ID e cria a primeira tarefa atual;
 	ID++;
 	ATUAL = MAIN;
 	criatratador();
 	criatimer();
+	tarefas_ativas++;
 	DISPATCHER = malloc(sizeof(task_t));
 	task_create(DISPATCHER,dispacher,NULL);
+	task_yield();
 
 
 }
@@ -199,15 +250,17 @@ int task_create(task_t *task,void (*start_func)(void *),void *arg){
 	task->id = ID;
 	ID++;
 	task->status = PRONTA;
-	task->preemptable = 0;
+	task->preemptable = 1;
 	task->ativacoes = 0;
+	task->tempo_ultimo_disparo = systime();
+	task->tempo_exec = 0;
 	task_setprio(task,0);
 
 	makecontext(&task->context, (void*)(*start_func), 1, arg);
 	if (task != DISPATCHER){
 		queue_append((queue_t **)&FILA_PRONTOS,(queue_t*)task);
+		tarefas_ativas++;
 	}
-
 	return 1;
 }
 
@@ -219,8 +272,17 @@ void task_exit(int exit_code) {
 	ATUAL = MAINAUX;
 	aux->status = TERMINADA;
 	CODE = exit_code;
+	aux->exit_code = exit_code;
 	aux->tempo_exec += systime() - aux->tempo_ultimo_disparo;
 	printf("Task %i exit: execution time %i ms, processor time %i ms, %i activations \n",aux->id, (systime() - aux->tempo_inic), aux->tempo_exec, aux->ativacoes );
+	if (aux == DISPATCHER){
+		exit(exit_code);
+	}
+	nova->status = RODANDO;
+	nova->ativacoes ++;
+	nova->tempo_ultimo_disparo = systime();
+
+	verificajoin(aux);
 	if (swapcontext (&aux->context, &nova->context) < 0){
 		perror("erro em troca de contexto: ");
 		exit(1);
@@ -239,6 +301,7 @@ int task_switch(task_t *task){
 	task->status = RODANDO;
 	task->ativacoes ++;
 	task->tempo_ultimo_disparo = systime();
+	TICK = 20;
 	if (swapcontext (&aux->context, &nova->context) < 0){
 		perror("erro em troca de contexto: ");
 		exit(1);
@@ -287,4 +350,70 @@ int task_getprio (task_t *task){
 
 unsigned int systime(){
 	return clock;
+}
+
+void task_suspend (task_t **queue) {
+	task_t *aux = ATUAL;
+	if (queue_remove((queue_t**)&FILA_PRONTOS,(queue_t*)aux) != 0){
+		return;
+	}
+	aux->status = SUSPENSA;
+	queue_append((queue_t **)queue,(queue_t*)aux);
+	return;
+}
+
+void task_resume(task_t *task, task_t **queue) {
+	if (queue_remove((queue_t**)queue,(queue_t*)task) != 0){
+		return;
+	}
+	task->status = PRONTA;
+	queue_append((queue_t **)&FILA_PRONTOS,(queue_t*)task);
+	return;
+}
+
+int task_join (task_t *task){
+	ATUAL->espera = task;
+	
+	task_t *aux = FILA_TERMINADA;
+	if (queue_size((queue_t*)FILA_TERMINADA) > 0){
+		do{
+			if (aux == task){
+				return aux->exit_code;	
+			}
+			aux = aux->next;
+		}while(aux != FILA_TERMINADA);
+	}
+
+	int flag = 0;
+	aux = FILA_PRONTOS;
+
+	if (queue_size((queue_t*)FILA_PRONTOS) > 0){
+		do{
+			if (aux == task){
+				flag = 1;	
+				break;
+			}
+			aux = aux->next;
+		}while(aux != FILA_PRONTOS);
+	}
+
+	if(flag == 1){
+		task_suspend(&FILA_SUSPENSA);
+		task_yield();
+		return ATUAL->espera->exit_code;
+	}
+	return -1;	
+}
+
+void task_sleep(int i){
+	printf("algo passou aqui\n");
+	task_t *aux = ATUAL;
+	if (queue_remove((queue_t**)&FILA_PRONTOS,(queue_t*)aux) != 0){
+		return;
+	}
+	ATUAL->sleep = systime() + i;
+	ATUAL->status = DORMINDO;
+	queue_append((queue_t **)&FILA_DORMITORIO,(queue_t*)aux);
+	task_yield();
+	return;
 }

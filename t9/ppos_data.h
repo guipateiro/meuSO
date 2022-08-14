@@ -28,6 +28,9 @@ typedef struct task_t
   unsigned int tempo_exec;
   unsigned int tempo_inic;
   unsigned int tempo_ultimo_disparo;
+  int exit_code;
+  struct task_t *espera;
+  unsigned int sleep;
    // ... (outros campos serão adicionados mais tarde)
 } task_t ;
 
