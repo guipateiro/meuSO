@@ -1,12 +1,14 @@
 // GRR20197152 GUILHERME COSTA PATEIRO
-// Data da ultima modificacao 15/08/2022 12:57
+// Data da ultima modificacao 31/08/2022 00:55
 
 #include "ppos_data.h"
 #include "ppos.h"
 #include "queue.h"
+#include "ppos_disk.h"
+#include "disk.h"
 #include <stdio.h>
 #include <stdlib.h>
- #include <unistd.h>
+#include <unistd.h>
 #include <ucontext.h>
 #include <signal.h>
 #include <sys/time.h>
@@ -21,22 +23,25 @@
 
 //variaveis globais do core
 task_t *MAIN;			//gurada a task main
-task_t *MAINAUX;		//guarda o a task que deve ser retornada pelos programas criados (atualmente o dispatcher)
+task_t *MAINAUX;		//guarda a task que deve ser retornada pelos programas criados (atualmente o dispatcher)
+task_t *DRIVERDISCO;	//guarda a task que gerencia o aceso ao disco virtual
 task_t *DISPATCHER;		//guarda a task dispatcher	
 task_t *ATUAL;			//guarda a task que esta atualemtne em execusao
 int TICK = 20;			// tamanho do quantum 
 int ID = 0;				// id que serao atribuidos as novas tasks
 int TAMBUFFER = 65536; 	//1024* 64 memoria alocada para cada contexto
+int fim = 0;
 unsigned int clock = 0;	//relogio do sistema
 struct sigaction action;// estrutura que define um tratador de sinal (deve ser global ou static)
+struct sigaction disco;// estrutura que define um tratador de sinal (deve ser global ou static)
 int tarefas_ativas = 0;	// contador de tarefas ativas
 struct itimerval timer; // estrutura de inicialização to timer
 
 task_t *FILA_PRONTOS 	= NULL ;   	//fila de task que estao prontas para serem executada
-task_t *FILA_SUSPENSA	= NULL;  	//fila de tarefas suspensas
+task_t *FILA_SUSPENSA	= NULL ;  	//fila de tarefas suspensas
 task_t *FILA_TERMINADA 	= NULL ; 	//fila de tarefas terminadas, usada no task join
 task_t *FILA_DORMITORIO	= NULL ; 	//fila de tarefas dormindo
-
+disk_t *DISK;
 
 
 void verificajoin(task_t *task){
@@ -114,6 +119,7 @@ void dispacher(){
 		}
 
 		//escolhe a proxima tarefa ativa
+		//printf("tarefas ativas :%i \n" ,queue_size((queue_t*)FILA_PRONTOS));
 		if (queue_size((queue_t*)FILA_PRONTOS) > 0){
 			next = scheduler();
 		}
@@ -133,7 +139,7 @@ void dispacher(){
 					queue_append((queue_t**)&FILA_TERMINADA,(queue_t*)next);
 				break;
 				case RODANDO:
-					//ain nao usado
+					//ainda nao usado (pelo visto nunca vai ser)
 					//printf("algo esta estranho a tarefa ainda esta rodando\n");
 				break;
 				case DORMINDO:
@@ -148,6 +154,9 @@ void dispacher(){
 			}
 		}
 	}
+	fim = 1;
+	if (DRIVERDISCO != NULL)
+		task_switch(DRIVERDISCO);
 	task_exit(0);
 }
 
@@ -198,7 +207,6 @@ void ppos_init(){
 	MAIN = malloc(sizeof(task_t));
 	MAIN->id = ID;
 	
-	MAIN->status = 1;
 	MAIN->preemptable = 1;
 	MAIN->status = PRONTA;
 	MAIN->ativacoes = 0;
@@ -255,9 +263,12 @@ int task_create(task_t *task,void (*start_func)(void *),void *arg){
 	task_setprio(task,0);
 
 	makecontext(&task->context, (void*)(*start_func), 1, arg);
-	if (task != DISPATCHER){
+	if (task != DISPATCHER && task != DRIVERDISCO){
 		queue_append((queue_t **)&FILA_PRONTOS,(queue_t*)task);
 		tarefas_ativas++;
+	}
+	else if (task == DRIVERDISCO){
+		queue_append((queue_t **)&FILA_PRONTOS,(queue_t*)task);
 	}
 	return 1;
 }
@@ -292,7 +303,8 @@ int task_switch(task_t *task){
 	task_t *aux = ATUAL;
 	task_t *nova = task;
 	ATUAL = task;
-	aux->status = PRONTA;
+	if(aux->status == RODANDO)
+		aux->status = PRONTA;
 	aux->tempo_exec += systime() - aux->tempo_ultimo_disparo;
 	if (task->ativacoes == 0)
 		task->tempo_inic = systime();
@@ -346,10 +358,13 @@ int task_getprio (task_t *task){
 	return task->prio_est;
 }
 
+//retorna o relogio do sistema atual
 unsigned int systime(){
 	return clock;
 }
 
+//suspende a terefa ATUAL e a coloca na lista apontada por queue 
+//chamar um task_yeld() apos utilizar essa funcao para evitar erros
 void task_suspend (task_t **queue) {
 	task_t *aux = ATUAL;
 	if (queue_remove((queue_t**)&FILA_PRONTOS,(queue_t*)aux) != 0){
@@ -360,6 +375,7 @@ void task_suspend (task_t **queue) {
 	return;
 }
 
+//retorna a task "task" que esta na fila "queue" para a filade terfas prontas
 void task_resume(task_t *task, task_t **queue) {
 	if (queue_remove((queue_t**)queue,(queue_t*)task) != 0){
 		return;
@@ -369,6 +385,9 @@ void task_resume(task_t *task, task_t **queue) {
 	return;
 }
 
+//faz a tarefa atual esperar o termino de "task"
+//caso "task" ja tennha terminado nao faz nada
+//caso "task" ainda esteja em execusao suspende a tarefa atual
 int task_join (task_t *task){
 	ATUAL->espera = task;
 	
@@ -387,8 +406,10 @@ int task_join (task_t *task){
 	return ATUAL->espera->exit_code;
 }
 
+//pausa a execusao da tarefa atual por "i" milisegundos
 void task_sleep(int i){
 	task_t *aux = ATUAL;
+
 	if (queue_remove((queue_t**)&FILA_PRONTOS,(queue_t*)aux) != 0){
 		return;
 	}
@@ -398,3 +419,271 @@ void task_sleep(int i){
 	task_yield();
 	return;
 }
+
+
+//cria um semaforo contendo "i" intancias
+int sem_create (semaphore_t *s, int value) {
+	if (value < 0){
+		perror("tamanho do semaforo deve ser um numero positivo");
+		return -1;
+	}
+
+    s->counter = value;
+    s->queue = NULL;
+
+    return 0;
+}
+
+//faz down no semaforo
+//caso counter seja negativo suspende as tarefas que tentarem dar down ate alguma tarefa dar up 
+int sem_down (semaphore_t *s) {
+    if(s == NULL){
+        return -1;
+    }
+    s->counter--;
+    if(s->counter < 0){
+        task_suspend(&(s->queue));
+        task_yield();
+        if(s == NULL){
+            return -1;
+        }
+    }
+    
+    return 0;
+}
+
+//faz up no semaforo
+//acorda 1 tarefa caso a fila do semaforo seja nao vazia
+int sem_up (semaphore_t *s) {
+    if(s == NULL) {
+        return -1;
+    }
+
+    s->counter++;
+    if(queue_size((queue_t*)s->queue) > 0){
+        task_resume(s->queue,&(s->queue));
+    }
+
+    return 0;
+}
+
+//destroi o semaforo
+//acorda todas as tarefas que esperam pela semaforo 
+int sem_destroy (semaphore_t *s) {
+    while(queue_size((queue_t*)s->queue) > 0){
+        task_resume(s->queue,&(s->queue));
+    }   
+    s->counter = 0;
+    s = NULL;
+    return 0;
+}
+
+//cria uma fila de mensagens com "max" mensagens de tamanho "size" cada
+int mqueue_create (mqueue_t *queue, int max, int size){
+    queue->tam_buffer = max;
+    queue->tam_msg = size;
+    sem_create(&(queue->p_buffer), 1);
+    sem_create(&(queue->s_c), 0);
+    sem_create(&(queue->s_p), queue->tam_buffer);
+   	queue->indice_p = 0;
+    queue->indice_c = 0;
+    queue->buffer = malloc(queue->tam_buffer * queue->tam_msg);
+    if(!queue->buffer){
+        perror("erro na alocacao da fila de mensagens");
+        return -1;
+    }
+    return 0;
+}
+
+//envia uma mensagem "msg" para a fila "queue"
+int mqueue_send (mqueue_t *queue, void *msg) {
+    if(queue->tam_buffer == -1)
+    	return -1;
+    if((sem_down(&(queue->s_p)) < 0) || (sem_down(&(queue->p_buffer)) < 0))
+    	return -1;
+    if(queue->tam_buffer == -1)
+		return -1;
+
+    memcpy(((queue->buffer)+ (queue->indice_p * queue->tam_msg)), msg, queue->tam_msg);
+    queue->indice_p++;
+    queue->indice_p = queue->indice_p % queue->tam_buffer;
+
+    if((sem_up(&(queue->p_buffer)) < 0) || (sem_up(&(queue->s_c)) < 0))
+    	return -1;
+    return 0;
+}
+
+//pega uma mensagem "msg" da fila "queue"
+int mqueue_recv (mqueue_t *queue, void *msg) {
+	if(queue->tam_buffer == -1)
+		return -1;
+    if((sem_down(&(queue->s_c)) < 0) ||(sem_down(&(queue->p_buffer)) < 0))
+    	return -1; 
+    if(queue->tam_buffer == -1)
+		return -1;
+
+    memcpy(msg, (queue->buffer) + (queue->indice_c * queue->tam_msg), queue->tam_msg);
+    queue->indice_c++;
+    queue->indice_c = queue->indice_c % queue->tam_buffer;
+
+    if((sem_up(&(queue->p_buffer)) < 0) || (sem_up(&(queue->s_p)) < 0)) 
+    	return -1;
+
+    return 0;
+}
+
+//finaliza uma fila de mensagens, 
+int mqueue_destroy (mqueue_t *queue) {
+    sem_destroy(&(queue->p_buffer));
+    sem_destroy(&(queue->s_c));
+    sem_destroy(&(queue->s_p));
+    //xunxo, gambiarra, engenharia de emergencia, artificio tecnico, asset de codigo
+    //nao sei como fazer diferente disso mas é o unico metodo que eu achei para lidar com o travamento pos feinalizacao
+    sem_create(&(queue->p_buffer), 100);
+    sem_create(&(queue->s_c), 100);
+    sem_create(&(queue->s_p), 100);
+    
+    free(queue->buffer);
+
+    queue->tam_buffer = -1;
+    queue->tam_msg = 0;
+
+    return 1;
+}
+
+
+void tratador_disco(){
+	DISK->flag = 1; 
+	//printf("SIGUSR1\n");
+	//printf("task status = %i \n", DRIVERDISCO->status );
+	if (DRIVERDISCO->status == SUSPENSA){
+		//printf("suspensa?\n");
+   		task_resume(DRIVERDISCO,&(DISPATCHER->espera));
+      	// acorda o gerente de disco (põe ele na fila de prontas)
+   	}
+	return;
+}
+
+void criatratador_disco(){
+	// registra a ação para o sinal SIGINT
+	disco.sa_handler = tratador_disco;
+	sigemptyset (&disco.sa_mask) ;
+	disco.sa_flags = 0 ;
+
+	if (sigaction (SIGUSR1, &disco, 0) < 0){
+		perror ("Erro em sigaction: ") ;
+		exit (1) ;
+	}
+} 
+
+
+void diskDriverBody (){
+   	while (!fim){
+			// obtém o semáforo de acesso ao disco
+		sem_down(&(DISK->semaforo));
+		
+			// se foi acordado devido a um sinal do disco
+		if (DISK->flag == 1){
+		    // acorda a tarefa cujo pedido foi atendido
+		    //printf("fez algo ?\n");
+			task_resume(DISK->queue,&(DISK->queue));
+			queue_remove((queue_t**)&DISK->pedidos,(queue_t*)DISK->pedidos);
+			DISK->flag = 0;
+		}
+
+		  // se o disco estiver livre e houver pedidos de E/S na fila
+		if ((disk_cmd (DISK_CMD_STATUS, 0, 0) == 1) && (DISK->queue != NULL)){
+			// escolhe na fila o pedido a ser atendido, usando FCFS
+		    // solicita ao disco a operação de E/S, usando disk_cmd()
+		    //printf("fez pedido\n");
+		    disk_cmd(DISK->pedidos->comando,DISK->pedidos->block, DISK->pedidos->buffer);
+		}
+
+		  	// libera o semáforo de acesso ao disco
+		sem_up(&(DISK->semaforo));
+			// suspende a tarefa corrente (retorna ao dispatcher)
+		//if (DISK->flag == 0){
+		task_suspend(&(DISPATCHER->espera));
+		//printf("task status = %i \n", DRIVERDISCO->status );
+		task_yield();
+		//}	
+   }
+   task_exit(0);
+}
+
+// inicializacao do gerente de disco
+// retorna -1 em erro ou 0 em sucesso
+// numBlocks: tamanho do disco, em blocos
+// blockSize: tamanho de cada bloco do disco, em bytes
+int disk_mgr_init (int *numBlocks, int *blockSize){
+	DRIVERDISCO = malloc(sizeof(task_t));
+	task_create(DRIVERDISCO,diskDriverBody,NULL);
+	DISK = malloc(sizeof(disk_t));
+	DISK->queue = NULL;
+	DISK->pedidos= NULL;
+	DISK->flag = 0;
+	criatratador_disco();
+	sem_create(&(DISK->semaforo), 1);
+	if (disk_cmd (DISK_CMD_INIT, 0, 0) < 0){
+		perror("erro ao inicializaro disco\n");
+		return -1;
+	}
+	*numBlocks = disk_cmd (DISK_CMD_DISKSIZE, 0, 0) ;
+	*blockSize = disk_cmd (DISK_CMD_BLOCKSIZE, 0, 0) ;
+	return 0;
+}
+
+// leitura de um bloco, do disco para o buffer
+int disk_block_read (int block, void *buffer){
+
+  	// obtém o semáforo de acesso ao disco
+ 	sem_down(&(DISK->semaforo));
+   	// inclui o pedido na fila_disco
+ 	diskcall_t *novo = malloc(sizeof(diskcall_t));
+ 	novo->comando = DISK_CMD_READ;
+ 	novo->block = block;
+ 	novo->buffer = buffer;
+
+ 	queue_append((queue_t **)&DISK->pedidos,(queue_t*)novo);
+
+ 	//printf("task status = %i \n", DRIVERDISCO->status );
+   	if (DRIVERDISCO->status == SUSPENSA){
+   		task_resume(DRIVERDISCO,&(DISPATCHER->espera));
+      	// acorda o gerente de disco (põe ele na fila de prontas)
+   	}
+ 
+   	// libera semáforo de acesso ao disco
+ 	sem_up(&(DISK->semaforo));
+   	// suspende a tarefa corrente (retorna ao dispatcher)
+ 	task_suspend(&(DISK->queue));
+ 	task_yield();
+ 	return 0;
+}
+
+// escrita de um bloco, do buffer para o disco
+int disk_block_write (int block, void *buffer){
+
+   	// obtém o semáforo de acesso ao disco
+ 	sem_down(&(DISK->semaforo));
+   	// inclui o pedido na fila_disco
+ 	diskcall_t *novo = malloc(sizeof(diskcall_t));
+ 	novo->comando = DISK_CMD_WRITE;
+ 	novo->block = block;
+ 	novo->buffer = buffer;
+
+ 	queue_append((queue_t **)&DISK->pedidos,(queue_t*)novo);
+
+ 	//printf("task status = %i \n", DRIVERDISCO->status );
+   	if (DRIVERDISCO->status == SUSPENSA){
+   		task_resume(DRIVERDISCO,&(DISPATCHER->espera));
+      	// acorda o gerente de disco (põe ele na fila de prontas)
+   	}
+ 
+   	// libera semáforo de acesso ao disco
+ 	sem_up(&(DISK->semaforo));
+   	// suspende a tarefa corrente (retorna ao dispatcher)
+ 	task_suspend(&(DISK->queue));
+ 	task_yield();
+ 	return 0;
+}
+

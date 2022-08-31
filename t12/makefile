@@ -1,9 +1,9 @@
 # GRR20197152 GUILHERME COSTA PATEIRO
-# Data da ultima modificacao 15/08/2022 12:40 
+# Data da ultima modificacao 25/08/2022 01:07 
 CFLAGS = -Wall -Wextra
 CC = gcc -std=gnu99 #-g
 
-all: ppos_sleep
+all: ppos_mqueue
 
 teste: all
 	./teste
@@ -11,8 +11,8 @@ teste: all
 queue.o: queue.c queue.h
 	$(CC) $(CFLAGS) -c $<
 
-ppos_sleep: ppos_core.c queue.o
-	$(CC) $(CFLAGS) -o teste $< queue.o pingpong-sleep.c
+ppos_mqueue: ppos_core.c queue.o
+	$(CC) $(CFLAGS) -o teste $< queue.o pingpong-mqueue.c -lm
 
 clear:
 	rm -f *.o

@@ -1,5 +1,5 @@
 // GRR20197152 GUILHERME COSTA PATEIRO
-// Data da ultima modificacao 15/08/2022 12:57
+// Data da ultima modificacao 25/08/2022 21:34
 
 #include "ppos_data.h"
 #include "ppos.h"
@@ -33,7 +33,7 @@ int tarefas_ativas = 0;	// contador de tarefas ativas
 struct itimerval timer; // estrutura de inicialização to timer
 
 task_t *FILA_PRONTOS 	= NULL ;   	//fila de task que estao prontas para serem executada
-task_t *FILA_SUSPENSA	= NULL;  	//fila de tarefas suspensas
+task_t *FILA_SUSPENSA	= NULL ;  	//fila de tarefas suspensas
 task_t *FILA_TERMINADA 	= NULL ; 	//fila de tarefas terminadas, usada no task join
 task_t *FILA_DORMITORIO	= NULL ; 	//fila de tarefas dormindo
 
@@ -114,6 +114,7 @@ void dispacher(){
 		}
 
 		//escolhe a proxima tarefa ativa
+		//printf("tarefas ativas :%i \n" ,queue_size((queue_t*)FILA_PRONTOS));
 		if (queue_size((queue_t*)FILA_PRONTOS) > 0){
 			next = scheduler();
 		}
@@ -133,7 +134,7 @@ void dispacher(){
 					queue_append((queue_t**)&FILA_TERMINADA,(queue_t*)next);
 				break;
 				case RODANDO:
-					//ain nao usado
+					//ainda nao usado (pelo visto nunca vai ser)
 					//printf("algo esta estranho a tarefa ainda esta rodando\n");
 				break;
 				case DORMINDO:
@@ -346,10 +347,13 @@ int task_getprio (task_t *task){
 	return task->prio_est;
 }
 
+//retorna o relogio do sistema atual
 unsigned int systime(){
 	return clock;
 }
 
+//suspende a terefa ATUAL e a coloca na lista apontada por queue 
+//chamar um task_yeld() apos utilizar essa funcao para evitar erros
 void task_suspend (task_t **queue) {
 	task_t *aux = ATUAL;
 	if (queue_remove((queue_t**)&FILA_PRONTOS,(queue_t*)aux) != 0){
@@ -360,6 +364,7 @@ void task_suspend (task_t **queue) {
 	return;
 }
 
+//retorna a task "task" que esta na fila "queue" para a filade terfas prontas
 void task_resume(task_t *task, task_t **queue) {
 	if (queue_remove((queue_t**)queue,(queue_t*)task) != 0){
 		return;
@@ -369,6 +374,9 @@ void task_resume(task_t *task, task_t **queue) {
 	return;
 }
 
+//faz a tarefa atual esperar o termino de "task"
+//caso "task" ja tennha terminado nao faz nada
+//caso "task" ainda esteja em execusao suspende a tarefa atual
 int task_join (task_t *task){
 	ATUAL->espera = task;
 	
@@ -387,8 +395,10 @@ int task_join (task_t *task){
 	return ATUAL->espera->exit_code;
 }
 
+//pausa a execusao da tarefa atual por "i" milisegundos
 void task_sleep(int i){
 	task_t *aux = ATUAL;
+
 	if (queue_remove((queue_t**)&FILA_PRONTOS,(queue_t*)aux) != 0){
 		return;
 	}
@@ -397,4 +407,135 @@ void task_sleep(int i){
 	queue_append((queue_t **)&FILA_DORMITORIO,(queue_t*)aux);
 	task_yield();
 	return;
+}
+
+
+//cria um semaforo contendo "i" intancias
+int sem_create (semaphore_t *s, int value) {
+	if (value < 0){
+		perror("tamanho do semaforo deve ser um numero positivo");
+		return -1;
+	}
+
+    s->counter = value;
+    s->queue = NULL;
+
+    return 0;
+}
+
+//faz down no semaforo
+//caso counter seja negativo suspende as tarefas que tentarem dar down ate alguma tarefa dar up 
+int sem_down (semaphore_t *s) {
+    if(s == NULL){
+        return -1;
+    }
+    s->counter--;
+    if(s->counter < 0){
+        task_suspend(&(s->queue));
+        task_yield();
+        if(s == NULL){
+            return -1;
+        }
+    }
+    
+    return 0;
+}
+
+//faz up no semaforo
+//acorda 1 tarefa caso a fila do semaforo seja nao vazia
+int sem_up (semaphore_t *s) {
+    if(s == NULL) {
+        return -1;
+    }
+
+    s->counter++;
+    if(queue_size((queue_t*)s->queue) > 0){
+        task_resume(s->queue,&(s->queue));
+    }
+
+    return 0;
+}
+
+//destroi o semaforo
+//acorda todas as tarefas que esperam pela semaforo 
+int sem_destroy (semaphore_t *s) {
+    while(queue_size((queue_t*)s->queue) > 0){
+        task_resume(s->queue,&(s->queue));
+    }   
+    s->counter = 0;
+    s = NULL;
+    return 0;
+}
+
+//cria uma fila de mensagens com "max" mensagens de tamanho "size" cada
+int mqueue_create (mqueue_t *queue, int max, int size){
+    queue->tam_buffer = max;
+    queue->tam_msg = size;
+    sem_create(&(queue->p_buffer), 1);
+    sem_create(&(queue->s_c), 0);
+    sem_create(&(queue->s_p), queue->tam_buffer);
+   	queue->indice_p = 0;
+    queue->indice_c = 0;
+    queue->buffer = malloc(queue->tam_buffer * queue->tam_msg);
+    if(!queue->buffer){
+        perror("erro na alocacao da fila de mensagens");
+        return -1;
+    }
+    return 0;
+}
+
+//envia uma mensagem "msg" para a fila "queue"
+int mqueue_send (mqueue_t *queue, void *msg) {
+    if(queue->tam_buffer == -1)
+    	return -1;
+    if((sem_down(&(queue->s_p)) < 0) || (sem_down(&(queue->p_buffer)) < 0))
+    	return -1;
+    if(queue->tam_buffer == -1)
+		return -1;
+
+    memcpy(((queue->buffer)+ (queue->indice_p * queue->tam_msg)), msg, queue->tam_msg);
+    queue->indice_p++;
+    queue->indice_p = queue->indice_p % queue->tam_buffer;
+
+    if((sem_up(&(queue->p_buffer)) < 0) || (sem_up(&(queue->s_c)) < 0))
+    	return -1;
+    return 0;
+}
+
+//pega uma mensagem "msg" da fila "queue"
+int mqueue_recv (mqueue_t *queue, void *msg) {
+	if(queue->tam_buffer == -1)
+		return -1;
+    if((sem_down(&(queue->s_c)) < 0) ||(sem_down(&(queue->p_buffer)) < 0))
+    	return -1; 
+    if(queue->tam_buffer == -1)
+		return -1;
+
+    memcpy(msg, (queue->buffer) + (queue->indice_c * queue->tam_msg), queue->tam_msg);
+    queue->indice_c++;
+    queue->indice_c = queue->indice_c % queue->tam_buffer;
+
+    if((sem_up(&(queue->p_buffer)) < 0) || (sem_up(&(queue->s_p)) < 0)) 
+    	return -1;
+
+    return 0;
+}
+
+//finaliza uma fila de mensagens, 
+int mqueue_destroy (mqueue_t *queue) {
+    sem_destroy(&(queue->p_buffer));
+    sem_destroy(&(queue->s_c));
+    sem_destroy(&(queue->s_p));
+    //xunxo, gambiarra, engenharia de emergencia, artificio tecnico, asset de codigo
+    //nao sei como fazer diferente disso mas é o unico metodo que eu achei para lidar com o travamento pos feinalizacao
+    sem_create(&(queue->p_buffer), 100);
+    sem_create(&(queue->s_c), 100);
+    sem_create(&(queue->s_p), 100);
+    
+    free(queue->buffer);
+
+    queue->tam_buffer = -1;
+    queue->tam_msg = 0;
+
+    return 1;
 }

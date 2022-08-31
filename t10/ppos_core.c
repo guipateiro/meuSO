@@ -389,7 +389,9 @@ int task_join (task_t *task){
 
 void task_sleep(int i){
 	task_t *aux = ATUAL;
+	//printf("sleep\n");
 	if (queue_remove((queue_t**)&FILA_PRONTOS,(queue_t*)aux) != 0){
+		printf("erro sleep\n");
 		return;
 	}
 	ATUAL->sleep = systime() + i;
@@ -397,4 +399,64 @@ void task_sleep(int i){
 	queue_append((queue_t **)&FILA_DORMITORIO,(queue_t*)aux);
 	task_yield();
 	return;
+}
+
+int sem_create (semaphore_t *s, int value) {
+	if (value < 0){
+		perror("tamanho do semaforo negativo");
+		return -1;
+	}
+
+    s->counter = value;
+    s->queue = NULL;
+    s->lock = 0;
+
+    return 0;
+}
+
+int sem_down (semaphore_t *s) {
+    if(s == NULL){
+        perror("semaforo nao existe\n");
+        return -1;
+    }
+
+    s->counter--;
+    if(s->counter < 0){
+        task_suspend(&(s->queue));
+        task_yield();
+        if(s == NULL){
+            return -1;
+        }
+    }
+    
+    return 0;
+}
+
+int sem_up (semaphore_t *s) {
+    if(s == NULL) {
+        perror("semaforo nao existe \n");
+        return -1;
+    }
+
+    s->counter++;
+    if(queue_size((queue_t*)s->queue) > 0){
+        task_resume(s->queue,&(s->queue));
+    }
+
+    return 0;
+}
+
+
+int sem_destroy (semaphore_t *s) {
+     while(queue_size((queue_t*)s->queue) > 0){
+        task_resume(s->queue,&(s->queue));
+    }   
+
+    if(s->queue != NULL){
+        return -1;
+    }
+
+    s->counter = 0;
+    s = NULL;
+    return 0;
 }

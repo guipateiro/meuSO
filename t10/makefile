@@ -3,7 +3,7 @@
 CFLAGS = -Wall -Wextra
 CC = gcc -std=gnu99 #-g
 
-all: ppos_sleep
+all: ppos_semaphore
 
 teste: all
 	./teste
@@ -11,8 +11,11 @@ teste: all
 queue.o: queue.c queue.h
 	$(CC) $(CFLAGS) -c $<
 
-ppos_sleep: ppos_core.c queue.o
-	$(CC) $(CFLAGS) -o teste $< queue.o pingpong-sleep.c
+ppos_semaphore: ppos_core.c queue.o
+	$(CC) $(CFLAGS) -o teste $< queue.o pingpong-semaphore.c
+
+ppos_racecond: ppos_core.c queue.o
+	$(CC) $(CFLAGS) -o teste $< queue.o pingpong-racecond.c
 
 clear:
 	rm -f *.o
