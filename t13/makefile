@@ -1,5 +1,5 @@
 # GRR20197152 GUILHERME COSTA PATEIRO
-# Data da ultima modificacao 31/08/2022 01:07 
+# Data da ultima modificacao 31/08/2022 21:40 
 CFLAGS = -Wall -Wextra
 CC = gcc -std=gnu99 -g
 
