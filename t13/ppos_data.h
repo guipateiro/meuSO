@@ -15,6 +15,13 @@
 #include <ucontext.h>		// biblioteca POSIX de trocas de contexto
 #include <string.h>
 
+//estados do programa
+#define TERMINADA 0
+#define SUSPENSA 4
+#define RODANDO 3
+#define DORMINDO 2
+#define PRONTA 1
+
 // Estrutura que define um Task Control Block (TCB)
 typedef struct task_t
 {
@@ -66,6 +73,10 @@ typedef struct
   void *buffer;                   // buffer circular
   int indice_p, indice_c ;        // indice de leitura e escrita
 } mqueue_t ;
+
+void task_suspend (struct task_t **queue);
+
+void task_resume(struct task_t *task, struct task_t **queue);
 
 #endif
 

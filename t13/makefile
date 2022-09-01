@@ -14,11 +14,16 @@ queue.o: queue.c queue.h
 disk.o:disk.c disk.h
 	$(CC) $(CFLAGS)	-c $<
 
-ppos_disco: ppos_core.c queue.o disk.o
-	$(CC) $(CFLAGS) -o teste $^  pingpong-disco1.c -lm -lrt
+ppos_disk.o:ppos_disk.c ppos_disk.h
+	$(CC) $(CFLAGS)	-c $<
 
-ppos_disco2: ppos_core.c queue.o disk.o
+ppos_disco: ppos_core.c ppos_disk.o queue.o disk.o
+	$(CC) $(CFLAGS) -o teste $^  pingpong-disco1.c -lm -lrt
+	echo "para executar ./teste ou make teste"
+
+ppos_disco2: ppos_core.c ppos_disk.o queue.o disk.o
 	$(CC) $(CFLAGS) -o teste $^  pingpong-disco2.c -lm -lrt	
+	echo "para executar ./teste ou make teste"
 
 clear:
 	rm -f *.o

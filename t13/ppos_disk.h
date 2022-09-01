@@ -14,7 +14,7 @@
 // estruturas de dados e rotinas de inicializacao e acesso
 // a um dispositivo de entrada/saida orientado a blocos,
 // tipicamente um disco rigido.
-
+#include "disk.h"
 #include "ppos_data.h"
 //estrutura que representa um pedido do disco
 typedef struct
