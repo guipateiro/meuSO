@@ -1,19 +1,15 @@
 // GRR20197152 GUILHERME COSTA PATEIRO
-// Data da ultima modificacao 31/08/2022 21:55
+// Data da ultima modificacao 01/09/2022 20:48
 
 #include "ppos_data.h"
 #include "ppos.h"
 #include "queue.h"
-#include "ppos_disk.h"
-#include "disk.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <ucontext.h>
 #include <signal.h>
 #include <sys/time.h>
-
-
 
 
 //variaveis globais do core
@@ -37,7 +33,11 @@ task_t *FILA_TERMINADA 	= NULL ; 	//fila de tarefas terminadas, usada no task jo
 task_t *FILA_DORMITORIO	= NULL ; 	//fila de tarefas dormindo
 
 
-
+/* gerência de tarefas =========================================================
+ *
+ *	criação e gerencia de tarefas, gerencia de filas , quantuns
+ *
+*/ 
 void verificajoin(task_t *task){
 	task_t *aux = FILA_SUSPENSA;
 	
@@ -133,6 +133,7 @@ void dispacher(){
 					queue_append((queue_t**)&FILA_TERMINADA,(queue_t*)next);
 				break;
 				case RODANDO:
+					next->status = PRONTA;
 					//ainda nao usado (pelo visto nunca vai ser)
 					//printf("algo esta estranho a tarefa ainda esta rodando\n");
 				break;
@@ -219,7 +220,7 @@ void ppos_init(){
 
 
 }
-// gerência de tarefas =========================================================
+
 
 // Cria uma nova tarefa. Retorna um ID> 0 ou erro.
 int task_create(task_t *task,void (*start_func)(void *),void *arg){
@@ -297,8 +298,6 @@ int task_switch(task_t *task){
 	task_t *aux = ATUAL;
 	task_t *nova = task;
 	ATUAL = task;
-	if(aux->status == RODANDO)
-		aux->status = PRONTA;
 	aux->tempo_exec += systime() - aux->tempo_ultimo_disparo;
 	if (task->ativacoes == 0)
 		task->tempo_inic = systime();
@@ -365,15 +364,18 @@ void task_suspend (task_t **queue) {
 		return;
 	}
 	aux->status = SUSPENSA;
-	queue_append((queue_t **)queue,(queue_t*)aux);
+	if (queue)
+		queue_append((queue_t **)queue,(queue_t*)aux);
 	return;
 }
 
 //retorna a task "task" que esta na fila "queue" para a filade terfas prontas
 void task_resume(task_t *task, task_t **queue) {
-	if (queue_remove((queue_t**)queue,(queue_t*)task) != 0){
-		return;
-	}
+	if (queue){
+		if (queue_remove((queue_t**)queue,(queue_t*)task) != 0){
+			return;
+		}
+	}	
 	task->status = PRONTA;
 	queue_append((queue_t **)&FILA_PRONTOS,(queue_t*)task);
 	return;
@@ -414,6 +416,11 @@ void task_sleep(int i){
 	return;
 }
 
+/* semaforos ===================================================================
+ *																			
+ *	criação de semaforos, bloqueios e desbloqueio e destruicao de semaforos
+ *
+*/ 
 
 //cria um semaforo contendo "i" intancias
 int sem_create (semaphore_t *s, int value) {
@@ -471,6 +478,12 @@ int sem_destroy (semaphore_t *s) {
     s = NULL;
     return 0;
 }
+
+/* filas de mensagens ==========================================================
+ *																		
+ *	criação de filas de mensagens , escritas e lidas com controle de acesso ao buffer, destruicao da fila
+ *
+*/ 
 
 //cria uma fila de mensagens com "max" mensagens de tamanho "size" cada
 int mqueue_create (mqueue_t *queue, int max, int size){

@@ -1,6 +1,6 @@
 // Arquivo modificado 
 // GRR20197152 GUILHERME COSTA PATEIRO
-// Data da ultima modificacao 31/08/2022 21:35
+// Data da ultima modificacao 01/09/2022 20:01
 
 // PROJETO ORIGINAL FEITO POR:
 // PingPongOS - PingPong Operating System
@@ -73,10 +73,6 @@ typedef struct
   void *buffer;                   // buffer circular
   int indice_p, indice_c ;        // indice de leitura e escrita
 } mqueue_t ;
-
-void task_suspend (struct task_t **queue);
-
-void task_resume(struct task_t *task, struct task_t **queue);
 
 #endif
 

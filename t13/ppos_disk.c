@@ -10,12 +10,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-extern struct task_t *DRIVERDISCO;
-disk_t *DISK;
+extern task_t *DRIVERDISCO;
 extern int fim;
-extern struct task_t *DISPATCHER;
-
-
+disk_t *DISK;
 struct sigaction disco;// estrutura que define um tratador de sinal (deve ser global ou static)
 
 void tratador_disco(){
@@ -24,7 +21,7 @@ void tratador_disco(){
 	//printf("task status = %i \n", DRIVERDISCO->status );
 	if (DRIVERDISCO->status == SUSPENSA){
 		//printf("suspensa?\n");
-   		task_resume(DRIVERDISCO,&(DISPATCHER->espera));
+   		task_resume(DRIVERDISCO,NULL);
       	// acorda o gerente de disco (põe ele na fila de prontas)
    	}
 	return;
@@ -69,7 +66,7 @@ void diskDriverBody (){
 		sem_up(&(DISK->semaforo));
 			// suspende a tarefa corrente (retorna ao dispatcher)
 		//if (DISK->flag == 0){
-		task_suspend(&(DISPATCHER->espera));
+		task_suspend(NULL);
 		//printf("task status = %i \n", DRIVERDISCO->status );
 		task_yield();
 		//}	
@@ -114,7 +111,7 @@ int disk_block_read (int block, void *buffer){
 
  	//printf("task status = %i \n", DRIVERDISCO->status );
    	if (DRIVERDISCO->status == SUSPENSA){
-   		task_resume(DRIVERDISCO,&(DISPATCHER->espera));
+   		task_resume(DRIVERDISCO,NULL);
       	// acorda o gerente de disco (põe ele na fila de prontas)
    	}
  
@@ -141,7 +138,7 @@ int disk_block_write (int block, void *buffer){
 
  	//printf("task status = %i \n", DRIVERDISCO->status );
    	if (DRIVERDISCO->status == SUSPENSA){
-   		task_resume(DRIVERDISCO,&(DISPATCHER->espera));
+   		task_resume(DRIVERDISCO,NULL);
       	// acorda o gerente de disco (põe ele na fila de prontas)
    	}
  
