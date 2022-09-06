@@ -1,6 +1,6 @@
 // Arquivo modificado 
 // GRR20197152 GUILHERME COSTA PATEIRO
-// Data da ultima modificacao 01/09/2022 20:01
+// Data da ultima modificacao 06/09/2022 20:17
 
 // PROJETO ORIGINAL FEITO POR:
 // PingPongOS - PingPong Operating System
@@ -54,13 +54,13 @@ typedef struct
 // estrutura que define um mutex
 typedef struct
 {
-  // preencher quando necessário
+	int i;  // preencher quando necessário
 } mutex_t ;
 
 // estrutura que define uma barreira
 typedef struct
 {
-  // preencher quando necessário
+ int i; // preencher quando necessário
 } barrier_t ;
 
 // estrutura que define uma fila de mensagens
@@ -75,4 +75,5 @@ typedef struct
 } mqueue_t ;
 
 #endif
+
 
